@@ -1,40 +1,57 @@
 # StockSense
 
-Odoo Hackathon 2026 — modular Inventory Management System.
+StockSense is a warehouse inventory management system built for the Odoo Hackathon.
 
-## Stack
-- Frontend: React + Vite
-- Backend: Node.js + Express
-- Database: SQLite (better-sqlite3)
-- Icons: lucide-react
+It provides a centralized view of warehouse stock, product movement, receiving, deliveries, transfers, adjustments, and low-stock information through a simple warehouse-control-room style interface.
 
-## Run
-### Backend
-```bash
-cd backend
-npm install
-npm run dev
-```
+## 🚀 Features
+
+- 🔐 User signup and login
+- 🔑 Forgot-password flow with OTP-based password reset
+- 📊 Inventory dashboard with key stock metrics
+- 📦 Product and SKU management
+- 🏭 Multi-location warehouse view
+- 📥 Stock receiving
+- 📤 Stock delivery
+- 🔄 Internal stock transfers
+- 🛠️ Physical stock adjustments
+- 📉 Low-stock monitoring
+- 🔎 Product and SKU-based inventory tracking
+- 📝 Complete stock movement history
+- 🗺️ Visual warehouse floor showing inventory locations
+- ⚡ Real-time stock calculations after inventory operations
+
+## 🏗️ Tech Stack
 
 ### Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
+- React
+- Vite
+- JavaScript
+- Lucide React
 
-Open http://localhost:5173
+### Backend
+- Node.js
+- Express.js
+- SQLite
+- better-sqlite3
 
-Demo account:
-- Email: demo@stocksense.local
-- Password: demo123
+## 📁 Project Structure
 
-## Core flow
-Supplier → Receive Goods → Stock Increases → Move/Store Stock → Customer Order → Deliver Goods → Stock Decreases → Adjust Damaged/Missing Stock → Stock Ledger
-
-## Distinctive UX
-- Visual warehouse control room
-- Inventory movement events
-- Product inventory DNA
-- Timeline / ledger view
-- Transfer visualization
+```text
+StockSense-Odoo/
+│
+├── backend/
+│   ├── db.js
+│   ├── server.js
+│   ├── package.json
+│   └── stocksense.db
+│
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx
+│   │   ├── api.js
+│   │   └── ...
+│   ├── package.json
+│   └── ...
+│
+└── README.md
