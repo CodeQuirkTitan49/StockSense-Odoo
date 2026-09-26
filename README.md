@@ -33,4 +33,4 @@ Excel sheets, and scattered stock tracking with a centralized system.
 
 ## Status
 
-🚧 Built during the Odoo Hackathon 2026.
+🚧 Built(ing) during the Odoo Hackathon 2026.
