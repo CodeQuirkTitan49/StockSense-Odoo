@@ -26,7 +26,7 @@ function App(){
 
 function Auth({onLogin}){
   const [mode,setMode]=useState("login");
-  const [form,setForm]=useState({name:"",email:"demo@stocksense.local",password:"demo123"});
+  const [form,setForm]=useState({name:"",email:"demo@stocksense.local",password:"Stock123"});
   const [error,setError]=useState("");
   const submit=async e=>{
     e.preventDefault(); setError("");
