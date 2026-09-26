@@ -1,36 +1,40 @@
 # StockSense
 
-A real-time Inventory Management System built for the Odoo Hackathon 2026.
+Odoo Hackathon 2026 — modular Inventory Management System.
 
-## Problem
+## Stack
+- Frontend: React + Vite
+- Backend: Node.js + Express
+- Database: SQLite (better-sqlite3)
+- Icons: lucide-react
 
-StockSense digitizes inventory operations and replaces manual registers,
-Excel sheets, and scattered stock tracking with a centralized system.
+## Run
+### Backend
+```bash
+cd backend
+npm install
+npm run dev
+```
 
-## Core Features
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-- Product Management
-- Inventory Dashboard
-- Incoming Stock / Receipts
-- Delivery Orders
-- Internal Transfers
-- Stock Adjustments
-- Stock Ledger
-- Low-stock Alerts
-- Search & Filters
-- Multi-location Inventory
+Open http://localhost:5173
 
-## Team
+Demo account:
+- Email: demo@stocksense.local
+- Password: demo123
 
-- Samyuktha Jannu
-- Keshetty Prathibha
+## Core flow
+Supplier → Receive Goods → Stock Increases → Move/Store Stock → Customer Order → Deliver Goods → Stock Decreases → Adjust Damaged/Missing Stock → Stock Ledger
 
-## Tech Stack
-
-- Frontend: TBD
-- Backend: TBD
-- Database: TBD
-
-## Status
-
-🚧 Built(ing) during the Odoo Hackathon 2026.
+## Distinctive UX
+- Visual warehouse control room
+- Inventory movement events
+- Product inventory DNA
+- Timeline / ledger view
+- Transfer visualization
