@@ -186,10 +186,18 @@ function Shell({ user, logout }) {
 
 function Dashboard({ go, refresh }) {
   const [data, setData] = useState(null);
+  const [stock, setStock] = useState([]);
+  const [products, setProducts] = useState([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.dashboard().then(setData).catch(e=>setError(e.message));
+    Promise.all([api.dashboard(), api.stock(), api.products()])
+      .then(([dashboard, stockRows, productRows]) => {
+        setData(dashboard);
+        setStock(stockRows);
+        setProducts(productRows);
+      })
+      .catch(e=>setError(e.message));
   }, [refresh]);
 
   if (error) return <div className="error-box">{error}</div>;
@@ -219,7 +227,7 @@ function Dashboard({ go, refresh }) {
       <section className="control-grid">
         <div className="panel floor-panel">
           <PanelHead eyebrow="LIVE FLOOR" title="Where inventory is now" action={<button className="text-action" onClick={()=>go("warehouse")}>Full floor <ChevronRight size={14}/></button>}/>
-          <WarehouseFloor locations={data.locations || []} compact onMove={()=>go("transfers")}/>
+          <WarehouseFloor locations={data.locations || []} stock={stock} products={products} compact onMove={()=>go("transfers")}/>
           <div className="floor-key">
             <span><i className="key-green"/> healthy</span>
             <span><i className="key-amber"/> attention</span>
@@ -258,7 +266,7 @@ function PanelHead({eyebrow,title,action}) {
   return <div className="panel-head"><div><p className="eyebrow">{eyebrow}</p><h3>{title}</h3></div>{action}</div>;
 }
 
-function WarehouseFloor({locations=[],compact=false,onMove}) {
+function WarehouseFloor({locations=[],stock=[],products=[],compact=false,onMove}) {
   const normalized = useMemo(() => {
     const find = name => locations.find(l => l.name.toLowerCase() === name.toLowerCase());
     return {
@@ -272,11 +280,15 @@ function WarehouseFloor({locations=[],compact=false,onMove}) {
 
   const Zone = ({data,kind,label}) => {
     if (!data) return <div className={`floor-zone ${kind} missing`}><small>{label}</small><b>—</b><span>not configured</span></div>;
-    const stock=Number(data.stock)||0, capacity=Number(data.capacity)||1, pct=Math.min(100,(stock/capacity)*100);
-    const state=pct>=85?"red":pct>=60?"amber":stock<=0?"red":"green";
+    const stockAmount=Number(data.stock)||0, capacity=Number(data.capacity)||1, pct=Math.min(100,(stockAmount/capacity)*100);
+    const lowStock = stock.some(r => String(r.location_id) === String(data.id) && (() => {
+      const product = products.find(p => String(p.id) === String(r.product_id));
+      return product && Number(r.quantity) <= Number(product.reorder_level);
+    })());
+    const state=lowStock?"amber":pct>=85?"red":stockAmount<=0?"red":"green";
     return <div className={`floor-zone ${kind} ${state}`}>
       <div className="zone-top"><span>{label}</span><MapPin size={12}/></div>
-      <strong>{Math.round(stock)}</strong>
+      <strong>{Math.round(stockAmount)}</strong>
       <small>units stored</small>
       <div className="capacity"><i style={{width:`${pct}%`}}/></div>
       <span className="capacity-label">{Math.round(pct)}% capacity</span>
@@ -308,9 +320,18 @@ function WarehouseFloor({locations=[],compact=false,onMove}) {
 
 function Products({refresh,notify}) {
   const [products,setProducts]=useState([]),[q,setQ]=useState(""),[open,setOpen]=useState(false);
+  const [deleting,setDeleting]=useState(null);
   const load=()=>api.products().then(setProducts);
   useEffect(()=>{load()},[refresh]);
   const filtered=products.filter(p=>(p.name+p.sku+p.category).toLowerCase().includes(q.toLowerCase()));
+
+  const remove = async (p) => {
+    if (!window.confirm(`Delete "${p.name}"? Products with stock or movement history will be protected.`)) return;
+    setDeleting(p.id);
+    try { await api.deleteProduct(p.id); notify("Product deleted"); await load(); }
+    catch (e) { notify(e.message); }
+    finally { setDeleting(null); }
+  };
 
   return <>
     <div className="page-toolbar">
@@ -318,8 +339,15 @@ function Products({refresh,notify}) {
       <button className="btn btn-dark" onClick={()=>setOpen(true)}><Plus size={16}/> New product</button>
     </div>
     <div className="search-row"><div className="search-box"><Search size={16}/><input placeholder="Search name, SKU or category" value={q} onChange={e=>setQ(e.target.value)}/></div><span>{filtered.length} products</span></div>
-    <div className="data-panel"><table><thead><tr><th>PRODUCT</th><th>SKU</th><th>CATEGORY</th><th>ON HAND</th><th>LOCATIONS</th><th>REORDER</th></tr></thead><tbody>
-      {filtered.map(p=><tr key={p.id}><td><strong>{p.name}</strong><small>{p.uom}</small></td><td><code>{p.sku}</code></td><td>{p.category}</td><td><b>{Math.round(p.total_stock)}</b> {p.uom}</td><td>{p.locations||"—"}</td><td>{Number(p.total_stock)<=Number(p.reorder_level)?<span className="status critical">LOW</span>:<span className="status healthy">HEALTHY</span>}</td></tr>)}
+    <div className="data-panel"><table><thead><tr><th>PRODUCT</th><th>SKU</th><th>CATEGORY</th><th>ON HAND</th><th>LOCATIONS</th><th>REORDER</th><th></th></tr></thead><tbody>
+      {filtered.map(p=><tr key={p.id}>
+        <td><strong>{p.name}</strong><small>{p.uom}</small></td><td><code>{p.sku}</code></td><td>{p.category}</td>
+        <td><b>{Math.round(p.total_stock)}</b> {p.uom}</td><td>{p.locations||"—"}</td>
+        <td>{Number(p.total_stock)<=Number(p.reorder_level)?<span className="status critical">LOW</span>:<span className="status healthy">HEALTHY</span>}</td>
+        <td><button className="icon-button danger-icon" title="Delete product" disabled={deleting===p.id} onClick={()=>remove(p)}>
+          {deleting===p.id?<RefreshCw size={14} className="spin"/>:<X size={15}/>}
+        </button></td>
+      </tr>)}
     </tbody></table>{!filtered.length&&<Empty text="No matching products."/>}</div>
     {open&&<ProductModal close={()=>setOpen(false)} done={()=>{setOpen(false);load();notify("Product created")}}/>}
   </>;
@@ -336,94 +364,154 @@ function ProductModal({close,done}) {
   </form></Modal>;
 }
 
-function getLocationStock(product, locationId, locations) {
-  if (!product || !locationId) return 0;
-  const location = locations.find(l => String(l.id) === String(locationId));
-  if (!location) return 0;
-  const parts = String(product.locations || "").split(/\s*,\s*/);
-  const match = parts.find(part => part.trim().toLowerCase().startsWith(`${location.name.toLowerCase()}:`));
-  if (!match) return 0;
-  const n = Number(match.slice(match.indexOf(":") + 1).trim());
-  return Number.isFinite(n) ? n : 0;
+function getLocationStock(productId, locationId, stockRows) {
+  if (!productId || !locationId) return 0;
+  const row = stockRows.find(
+    r => String(r.product_id) === String(productId) &&
+         String(r.location_id) === String(locationId)
+  );
+  return row ? Number(row.quantity) || 0 : 0;
 }
-
 function OperationForm({type,refresh,notify}) {
   const receipt=type==="receipt";
-  const [products,setProducts]=useState([]),[locations,setLocations]=useState([]),[f,setF]=useState({}),[err,setErr]=useState("");
-  useEffect(()=>{Promise.all([api.products(),api.locations()]).then(([p,l])=>{
-    setProducts(p); setLocations(l);
-    const firstProduct=p[0];
-    const stocked=firstProduct ? l.find(loc=>getLocationStock(firstProduct,loc.id,l)>0) : null;
-    setF(x=>({...x,product_id:x.product_id||firstProduct?.id,location_id:x.location_id||(receipt?l[0]?.id:stocked?.id||l[0]?.id)}));
-  })},[refresh]);
+  const [products,setProducts]=useState([]),[locations,setLocations]=useState([]),[stock,setStock]=useState([]),[f,setF]=useState({}),[err,setErr]=useState("");
+
+  const load=async()=>{
+    try{
+      const [p,l,st]=await Promise.all([api.products(),api.locations(),api.stock()]);
+      setProducts(p); setLocations(l); setStock(st);
+      const firstProduct=p[0];
+      const stocked=firstProduct ? l.find(loc=>getLocationStock(firstProduct.id,loc.id,st)>0) : null;
+      setF(x=>({...x,product_id:x.product_id||firstProduct?.id,location_id:x.location_id||(receipt?l[0]?.id:stocked?.id||l[0]?.id)}));
+    }catch(e){setErr(e.message)}
+  };
+  useEffect(()=>{load()},[refresh]);
+
   const selectedProduct=products.find(p=>String(p.id)===String(f.product_id));
-  const currentStock=getLocationStock(selectedProduct,f.location_id,locations);
+  const currentStock=getLocationStock(f.product_id,f.location_id,stock);
   const quantity=Number(f.quantity)||0;
   const afterStock=receipt?currentStock+quantity:currentStock-quantity;
   const insufficient=!receipt&&quantity>currentStock;
   const unit=selectedProduct?.uom||"units";
   const locationName=locations.find(l=>String(l.id)===String(f.location_id))?.name||"Selected location";
-  const submit=async e=>{e.preventDefault();setErr("");if(insufficient){setErr(`Only ${currentStock} ${unit} are available at this location.`);return;}try{await api[receipt?"receipt":"delivery"]({...f,quantity});notify(receipt?"Goods received — stock increased":"Delivery validated — stock decreased");setF(x=>({...x,quantity:""}))}catch(x){setErr(x.message)}};
+
+  const submit=async e=>{
+    e.preventDefault();setErr("");
+    if(insufficient){setErr(`Only ${currentStock} ${unit} are available at this location.`);return;}
+    try{
+      await api[receipt?"receipt":"delivery"]({...f,quantity});
+      notify(receipt?"Goods received — stock increased":"Delivery validated — stock decreased");
+      await load(); setF(x=>({...x,quantity:""}));
+    }catch(x){setErr(x.message)}
+  };
+
   return <div className="operation-page">
     <div className="page-toolbar"><div><p className="eyebrow">{receipt?"INBOUND OPERATION":"OUTBOUND OPERATION"}</p><h1>{receipt?"Receive goods":"Deliver goods"}</h1><p>{receipt?"Register goods arriving from a supplier.":"Remove goods from a warehouse location for a customer."}</p></div></div>
     <div className="operation-layout">
       <form className="data-panel operation-form form" onSubmit={submit}>
         <div className="operation-badge">{receipt?<ArrowDownToLine/>:<ArrowUpFromLine/>}<span>{receipt?"STOCK IN":"STOCK OUT"}</span></div>
-        <Field label="Product"><select required value={f.product_id||""} onChange={e=>setF({...f,product_id:e.target.value})}>{products.map(p=><option key={p.id} value={p.id}>{p.name} · {p.sku}</option>)}</select></Field>
+        <Field label="Product"><select required value={f.product_id||""} onChange={e=>{
+          const next=e.target.value;
+          const stocked=locations.find(l=>getLocationStock(next,l.id,stock)>0);
+          setF({...f,product_id:next,location_id:receipt?(f.location_id||locations[0]?.id):(stocked?.id||f.location_id||locations[0]?.id)});
+        }}>{products.map(p=><option key={p.id} value={p.id}>{p.name} · {p.sku}</option>)}</select></Field>
         <Field label={receipt?"Supplier":"Customer"}><input value={f[receipt?"supplier":"customer"]||""} onChange={e=>setF({...f,[receipt?"supplier":"customer"]:e.target.value})} placeholder={receipt?"Supplier name":"Customer name"}/></Field>
-        <Field label={receipt?"Destination":"Source location"}><select required value={f.location_id||""} onChange={e=>setF({...f,location_id:e.target.value})}>{locations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></Field>
+        <Field label={receipt?"Destination":"Source location"}><select required value={f.location_id||""} onChange={e=>setF({...f,location_id:e.target.value})}>
+          {locations.map(l=><option key={l.id} value={l.id}>{l.name} · {Math.round(getLocationStock(f.product_id,l.id,stock))} {unit}</option>)}
+        </select></Field>
         <Field label="Quantity"><input type="number" min="0.01" step="0.01" required value={f.quantity||""} onChange={e=>setF({...f,quantity:e.target.value})}/></Field>
         {err&&<div className="error-box">{err}</div>}
         <button className={`btn ${receipt?"btn-green":"btn-red"} full`} disabled={insufficient}>{receipt?"Validate receipt":"Validate delivery"} <CheckCircle2 size={16}/></button>
       </form>
       <div className="operation-side">
-        <div className="side-card live-preview-card"><p className="eyebrow">LIVE STOCK PREVIEW</p><h3>{locationName}</h3><div className="stock-preview-row"><span>Current</span><strong>{Math.round(currentStock)} {unit}</strong></div><div className="stock-preview-row"><span>{receipt?"Incoming":"Outgoing"}</span><strong className={receipt?"positive":"negative"}>{receipt?"+":"−"}{Math.round(quantity)} {unit}</strong></div><div className="stock-preview-after"><span>After validation</span><strong>{Math.round(afterStock)} {unit}</strong></div>{!receipt&&<small className={insufficient?"preview-warning":"preview-ok"}>{insufficient?`Not enough stock here — ${Math.round(currentStock)} available.`:`${Math.round(currentStock)} ${unit} available to deliver.`}</small>}</div>
+        <div className="side-card live-preview-card"><p className="eyebrow">LIVE STOCK PREVIEW</p><h3>{locationName}</h3>
+          <div className="stock-preview-row"><span>Current</span><strong>{Math.round(currentStock)} {unit}</strong></div>
+          <div className="stock-preview-row"><span>{receipt?"Incoming":"Outgoing"}</span><strong className={receipt?"positive":"negative"}>{receipt?"+":"−"}{Math.round(quantity)} {unit}</strong></div>
+          <div className="stock-preview-after"><span>After validation</span><strong>{Math.max(0,Math.round(afterStock))} {unit}</strong></div>
+          {!receipt&&<small className={insufficient?"preview-warning":"preview-ok"}>{insufficient?`Not enough stock here — ${Math.round(currentStock)} available.`:`${Math.round(currentStock)} ${unit} available to deliver.`}</small>}
+        </div>
         <div className="side-card"><p className="eyebrow">WHAT HAPPENS</p><Flow items={receipt?["Supplier arrives","Goods enter destination","Stock increases","Ledger entry"]:["Customer order","Goods leave source","Stock decreases","Ledger entry"]}/></div>
       </div>
     </div>
   </div>;
 }
+
 function TransferForm({refresh,notify}){
-  const [products,setProducts]=useState([]),[locations,setLocations]=useState([]),[f,setF]=useState({}),[err,setErr]=useState("");
-  useEffect(()=>{Promise.all([api.products(),api.locations()]).then(([p,l])=>{
-    setProducts(p); setLocations(l);
-    const firstProduct=p[0];
-    const source=firstProduct ? l.find(loc=>getLocationStock(firstProduct,loc.id,l)>0) : null;
-    const destination=l.find(loc=>loc.id!==source?.id);
-    setF(x=>({...x,product_id:x.product_id||firstProduct?.id,from_location_id:x.from_location_id||source?.id||l[0]?.id,to_location_id:x.to_location_id||destination?.id||l[1]?.id}));
-  })},[refresh]);
+  const [products,setProducts]=useState([]),[locations,setLocations]=useState([]),[stock,setStock]=useState([]),[f,setF]=useState({}),[err,setErr]=useState("");
+
+  const load=async()=>{
+    try{
+      const [p,l,st]=await Promise.all([api.products(),api.locations(),api.stock()]);
+      setProducts(p);setLocations(l);setStock(st);
+      const firstProduct=p[0], source=firstProduct?l.find(loc=>getLocationStock(firstProduct.id,loc.id,st)>0):null;
+      const destination=l.find(loc=>loc.id!==source?.id);
+      setF(x=>({...x,product_id:x.product_id||firstProduct?.id,from_location_id:x.from_location_id||source?.id||l[0]?.id,to_location_id:x.to_location_id||destination?.id||l[1]?.id}));
+    }catch(e){setErr(e.message)}
+  };
+  useEffect(()=>{load()},[refresh]);
+
   const selectedProduct=products.find(p=>String(p.id)===String(f.product_id));
-  const fromStock=getLocationStock(selectedProduct,f.from_location_id,locations);
-  const toStock=getLocationStock(selectedProduct,f.to_location_id,locations);
-  const quantity=Number(f.quantity)||0;
-  const insufficient=quantity>fromStock;
-  const sameLocation=String(f.from_location_id)===String(f.to_location_id);
+  const fromStock=getLocationStock(f.product_id,f.from_location_id,stock), toStock=getLocationStock(f.product_id,f.to_location_id,stock);
+  const quantity=Number(f.quantity)||0, insufficient=quantity>fromStock, sameLocation=String(f.from_location_id)===String(f.to_location_id);
   const fromName=locations.find(l=>String(l.id)===String(f.from_location_id))?.name||"From";
   const toName=locations.find(l=>String(l.id)===String(f.to_location_id))?.name||"To";
   const unit=selectedProduct?.uom||"units";
-  const submit=async e=>{e.preventDefault();setErr("");if(sameLocation){setErr("Choose two different locations.");return;}if(insufficient){setErr(`Only ${fromStock} ${unit} are available at ${fromName}.`);return;}try{await api.transfer({...f,quantity});notify("Stock moved — location quantities updated");setF(x=>({...x,quantity:""}))}catch(x){setErr(x.message)}};
+
+  const submit=async e=>{
+    e.preventDefault();setErr("");
+    if(sameLocation){setErr("Choose two different locations.");return;}
+    if(insufficient){setErr(`Only ${fromStock} ${unit} are available at ${fromName}.`);return;}
+    try{await api.transfer({...f,quantity});notify("Stock moved — location quantities updated");await load();setF(x=>({...x,quantity:""}))}
+    catch(x){setErr(x.message)}
+  };
+
   return <div className="operation-page"><div className="page-toolbar"><div><p className="eyebrow">INTERNAL MOVEMENT</p><h1>Move stock</h1><p>Move units between physical locations without changing total stock.</p></div></div>
-    <div className="transfer-layout"><form className="data-panel transfer-panel form" onSubmit={submit}><Field label="Product"><select value={f.product_id||""} onChange={e=>setF({...f,product_id:e.target.value})}>{products.map(p=><option key={p.id} value={p.id}>{p.name} · {p.sku}</option>)}</select></Field><div className="route"><Field label="FROM"><select value={f.from_location_id||""} onChange={e=>setF({...f,from_location_id:e.target.value})}>{locations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></Field><div className="route-arrow"><ArrowRightIcon/></div><Field label="TO"><select value={f.to_location_id||""} onChange={e=>setF({...f,to_location_id:e.target.value})}>{locations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></Field></div><Field label="Quantity"><input type="number" min="0.01" step="0.01" required value={f.quantity||""} onChange={e=>setF({...f,quantity:e.target.value})}/></Field>{err&&<div className="error-box">{err}</div>}<button className="btn btn-dark full" disabled={insufficient||sameLocation}>Confirm transfer <ArrowLeftRight size={16}/></button></form>
-      <div className="operation-side"><div className="side-card live-preview-card"><p className="eyebrow">LIVE LOCATION PREVIEW</p><div className="transfer-preview"><div><small>{fromName}</small><strong>{Math.round(fromStock)} {unit}</strong><span>→ {Math.round(fromStock-quantity)} after</span></div><ArrowLeftRight size={18}/><div><small>{toName}</small><strong>{Math.round(toStock)} {unit}</strong><span>→ {Math.round(toStock+quantity)} after</span></div></div><div className="transfer-total">Warehouse total stays <strong>{Math.round(fromStock+toStock)} {unit}</strong> across these two locations.</div>{insufficient&&<small className="preview-warning">Not enough stock at the source location.</small>}</div><div className="side-card"><p className="eyebrow">WHAT HAPPENS</p><Flow items={["Choose source","Choose destination","Location quantities change","Ledger entry"]}/></div></div>
-    </div>
+    <div className="transfer-layout"><form className="data-panel transfer-panel form" onSubmit={submit}>
+      <Field label="Product"><select value={f.product_id||""} onChange={e=>{const next=e.target.value;const source=locations.find(l=>getLocationStock(next,l.id,stock)>0);setF({...f,product_id:next,from_location_id:source?.id||locations[0]?.id})}}>
+        {products.map(p=><option key={p.id} value={p.id}>{p.name} · {p.sku}</option>)}</select></Field>
+      <div className="route"><Field label="FROM"><select value={f.from_location_id||""} onChange={e=>setF({...f,from_location_id:e.target.value})}>{locations.map(l=><option key={l.id} value={l.id}>{l.name} · {Math.round(getLocationStock(f.product_id,l.id,stock))} {unit}</option>)}</select></Field><div className="route-arrow"><ArrowRightIcon/></div><Field label="TO"><select value={f.to_location_id||""} onChange={e=>setF({...f,to_location_id:e.target.value})}>{locations.map(l=><option key={l.id} value={l.id}>{l.name} · {Math.round(getLocationStock(f.product_id,l.id,stock))} {unit}</option>)}</select></Field></div>
+      <Field label="Quantity"><input type="number" min="0.01" step="0.01" required value={f.quantity||""} onChange={e=>setF({...f,quantity:e.target.value})}/></Field>
+      {err&&<div className="error-box">{err}</div>}<button className="btn btn-dark full" disabled={insufficient||sameLocation}>Confirm transfer <ArrowLeftRight size={16}/></button>
+    </form>
+    <div className="operation-side"><div className="side-card live-preview-card"><p className="eyebrow">LIVE LOCATION PREVIEW</p><div className="transfer-preview">
+      <div><small>{fromName}</small><strong>{Math.round(fromStock)} {unit}</strong><span>→ {Math.max(0,Math.round(fromStock-quantity))} after</span></div><ArrowLeftRight size={18}/><div><small>{toName}</small><strong>{Math.round(toStock)} {unit}</strong><span>→ {Math.round(toStock+quantity)} after</span></div>
+    </div><div className="transfer-total">Warehouse total stays <strong>{Math.round(fromStock+toStock)} {unit}</strong> across these two locations.</div>{insufficient&&<small className="preview-warning">Not enough stock at the source location.</small>}</div>
+    <div className="side-card"><p className="eyebrow">WHAT HAPPENS</p><Flow items={["Choose source","Choose destination","Location quantities change","Ledger entry"]}/></div></div></div>
   </div>;
 }
 function ArrowRightIcon(){ return <ChevronRight size={23}/>; }
 
 function AdjustmentForm({refresh,notify}){
-  const [products,setProducts]=useState([]),[locations,setLocations]=useState([]),[f,setF]=useState({}),[current,setCurrent]=useState(0),[err,setErr]=useState("");
-  useEffect(()=>{Promise.all([api.products(),api.locations()]).then(([p,l])=>{
-    setProducts(p); setLocations(l);
-    const firstProduct=p[0];
-    const stocked=firstProduct ? l.find(loc=>getLocationStock(firstProduct,loc.id,l)>0) : null;
-    setF({product_id:firstProduct?.id,location_id:stocked?.id||l[0]?.id,counted_quantity:"",reason:"Damaged",notes:""});
-  })},[refresh]);
-  useEffect(()=>{const p=products.find(x=>String(x.id)===String(f.product_id));setCurrent(getLocationStock(p,f.location_id,locations))},[f.product_id,f.location_id,products,locations]);
+  const [products,setProducts]=useState([]),[locations,setLocations]=useState([]),[stock,setStock]=useState([]),[f,setF]=useState({}),[current,setCurrent]=useState(0),[err,setErr]=useState("");
+
+  const load=async()=>{
+    try{
+      const [p,l,st]=await Promise.all([api.products(),api.locations(),api.stock()]);
+      setProducts(p);setLocations(l);setStock(st);
+      const firstProduct=p[0], stocked=firstProduct?l.find(loc=>getLocationStock(firstProduct.id,loc.id,st)>0):null;
+      setF({product_id:firstProduct?.id,location_id:stocked?.id||l[0]?.id,counted_quantity:"",reason:"Damaged",notes:""});
+    }catch(e){setErr(e.message)}
+  };
+  useEffect(()=>{load()},[refresh]);
+  useEffect(()=>{setCurrent(getLocationStock(f.product_id,f.location_id,stock))},[f.product_id,f.location_id,stock]);
+
   const diff=(Number(f.counted_quantity)||0)-Number(current);
   const locationName=locations.find(l=>String(l.id)===String(f.location_id))?.name||"Selected location";
   const unit=products.find(p=>String(p.id)===String(f.product_id))?.uom||"units";
-  const submit=async e=>{e.preventDefault();setErr("");try{await api.adjustment({...f,counted_quantity:Number(f.counted_quantity)});notify(`Adjustment applied at ${locationName}: ${diff>=0?"+":""}${diff} ${unit}`);setF(x=>({...x,counted_quantity:"",notes:""}))}catch(x){setErr(x.message)}};
-  return <div className="operation-page"><div className="page-toolbar"><div><p className="eyebrow">EXCEPTION HANDLING</p><h1>Adjust stock</h1><p>Compare the system quantity at one location with the physical count you actually found.</p></div></div><form className="data-panel adjustment-panel form" onSubmit={submit}><div className="compare"><div><small>SYSTEM AT {locationName.toUpperCase()}</small><strong>{Math.round(current)}</strong><span>{unit}</span></div><div className={diff===0?"match":diff<0?"negative":"positive"}>{diff===0?"MATCH":`${diff>0?"+":""}${diff} ${unit}`}</div><div><small>PHYSICAL COUNT</small><input type="number" min="0" required value={f.counted_quantity||""} onChange={e=>setF({...f,counted_quantity:e.target.value})}/></div></div><div className="two"><Field label="Product"><select value={f.product_id||""} onChange={e=>setF({...f,product_id:e.target.value})}>{products.map(p=><option key={p.id} value={p.id}>{p.name} · {p.sku}</option>)}</select></Field><Field label="Location"><select value={f.location_id||""} onChange={e=>setF({...f,location_id:e.target.value})}>{locations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></Field></div><Field label="Reason"><select value={f.reason} onChange={e=>setF({...f,reason:e.target.value})}><option>Damaged</option><option>Missing</option><option>Counting error</option><option>Other</option></select></Field><Field label="Notes"><textarea value={f.notes} onChange={e=>setF({...f,notes:e.target.value})} placeholder="What happened? e.g. 3 units damaged during handling."/></Field>{err&&<div className="error-box">{err}</div>}<button className="btn btn-dark full">Apply adjustment <ClipboardCheck size={16}/></button></form></div>;
+
+  const submit=async e=>{e.preventDefault();setErr("");try{await api.adjustment({...f,counted_quantity:Number(f.counted_quantity)});notify(`Adjustment applied at ${locationName}: ${diff>=0?"+":""}${diff} ${unit}`);await load()}catch(x){setErr(x.message)}};
+
+  return <div className="operation-page"><div className="page-toolbar"><div><p className="eyebrow">EXCEPTION HANDLING</p><h1>Adjust stock</h1><p>Compare the system quantity at one location with the physical count you actually found.</p></div></div>
+    <form className="data-panel adjustment-panel form" onSubmit={submit}><div className="compare">
+      <div><small>SYSTEM AT {locationName.toUpperCase()}</small><strong>{Math.round(current)}</strong><span>{unit}</span></div>
+      <div className={diff===0?"match":diff<0?"negative":"positive"}>{diff===0?"MATCH":`${diff>0?"+":""}${diff} ${unit}`}</div>
+      <div><small>PHYSICAL COUNT</small><input type="number" min="0" required value={f.counted_quantity||""} onChange={e=>setF({...f,counted_quantity:e.target.value})}/></div>
+    </div><div className="two">
+      <Field label="Product"><select value={f.product_id||""} onChange={e=>setF({...f,product_id:e.target.value})}>{products.map(p=><option key={p.id} value={p.id}>{p.name} · {p.sku}</option>)}</select></Field>
+      <Field label="Location"><select value={f.location_id||""} onChange={e=>setF({...f,location_id:e.target.value})}>{locations.map(l=><option key={l.id} value={l.id}>{l.name} · {Math.round(getLocationStock(f.product_id,l.id,stock))} {unit}</option>)}</select></Field>
+    </div><Field label="Reason"><select value={f.reason} onChange={e=>setF({...f,reason:e.target.value})}><option>Damaged</option><option>Missing</option><option>Counting error</option><option>Other</option></select></Field>
+    <Field label="Notes"><textarea value={f.notes} onChange={e=>setF({...f,notes:e.target.value})} placeholder="What happened? e.g. 3 units damaged during handling."/></Field>{err&&<div className="error-box">{err}</div>}
+    <button className="btn btn-dark full">Apply adjustment <ClipboardCheck size={16}/></button></form></div>;
 }
 function HistoryPage({refresh}) {
   const [moves,setMoves]=useState([]),[q,setQ]=useState(""),[type,setType]=useState("ALL");
@@ -436,10 +524,10 @@ function HistoryPage({refresh}) {
 }
 
 function WarehousePage({refresh,go}) {
-  const [locs,setLocs]=useState([]);
-  useEffect(()=>{api.locations().then(setLocs)},[refresh]);
+  const [locs,setLocs]=useState([]),[stock,setStock]=useState([]),[products,setProducts]=useState([]);
+  useEffect(()=>{Promise.all([api.locations(),api.stock(),api.products()]).then(([l,s,p])=>{setLocs(l);setStock(s);setProducts(p)})},[refresh]);
   return <div><div className="page-toolbar"><div><p className="eyebrow">SPATIAL INVENTORY</p><h1>Warehouse floor</h1><p>A physical view of where inventory is stored inside Main Warehouse.</p></div><button className="btn btn-dark" onClick={()=>go("transfers")}><ArrowLeftRight size={16}/> Move stock</button></div>
-    <div className="floor-full panel"><WarehouseFloor locations={locs} onMove={()=>go("transfers")}/><div className="floor-footer"><span><i className="key-green"/> Healthy</span><span><i className="key-amber"/> Attention</span><span><i className="key-red"/> Critical / empty</span><span className="floor-note">Flow follows receiving → storage → production → dispatch</span></div></div>
+    <div className="floor-full panel"><WarehouseFloor locations={locs} stock={stock} products={products} onMove={()=>go("transfers")}/><div className="floor-footer"><span><i className="key-green"/> Healthy</span><span><i className="key-amber"/> Low-stock SKU</span><span><i className="key-red"/> Empty / capacity critical</span><span className="floor-note">Flow follows receiving → storage → production → dispatch</span></div></div>
   </div>;
 }
 

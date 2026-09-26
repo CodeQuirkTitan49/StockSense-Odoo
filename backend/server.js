@@ -87,6 +87,28 @@ app.get("/api/locations", (_,res)=>res.json(db.prepare(`
   LEFT JOIN stock s ON s.location_id=l.id GROUP BY l.id ORDER BY l.id
 `).all()));
 
+app.get("/api/stock", (_, res) => {
+  const stock = db.prepare(`
+    SELECT
+      s.product_id,
+      s.location_id,
+      s.quantity,
+      p.name AS product_name,
+      p.sku,
+      p.uom,
+      p.category,
+      p.reorder_level,
+      l.name AS location_name,
+      l.warehouse_id
+    FROM stock s
+    JOIN products p ON p.id = s.product_id
+    JOIN locations l ON l.id = s.location_id
+    ORDER BY p.name, l.id
+  `).all();
+
+  res.json(stock);
+});
+
 function ensureStock(productId, locationId) {
   db.prepare("INSERT OR IGNORE INTO stock(product_id,location_id,quantity) VALUES(?,?,0)")
     .run(productId, locationId);
